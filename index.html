@@ -8,13 +8,14 @@
     <style>
         body { padding: 20px; background-color: #f4f6f9; }
         .card { box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        /* 日志区域样式优化 */
+        /* 日志区域样式 */
         #logs { 
             background: #1e1e1e; color: #a9b7c6; 
-            height: 500px; overflow-y: scroll; 
+            height: 600px; /* 稍微调高一点 */
+            overflow-y: scroll; 
             padding: 15px; font-family: 'Consolas', monospace; 
             font-size: 13px; line-height: 1.4;
-            white-space: pre-wrap; /* 保留换行 */
+            white-space: pre-wrap; 
         }
     </style>
 </head>
@@ -79,6 +80,13 @@
                         </div>
 
                         <h6 class="text-muted mb-2">测速参数</h6>
+                        
+                        <div class="mb-2">
+                            <label class="small text-muted">自定义测速地址 (-url)</label>
+                            <input type="text" class="form-control form-control-sm" name="download_url" value="{{.DownloadURL}}" placeholder="留空使用默认 (200MB)">
+                            <div class="form-text small" style="margin-top:0;">可填入自建的大文件下载链接，为空则使用 Cloudflare 官方默认地址。</div>
+                        </div>
+
                         <div class="row g-2 mb-2">
                             <div class="col-12">
                                 <div class="btn-group w-100 btn-group-sm" role="group">
@@ -117,7 +125,7 @@
                             <input type="text" class="form-control form-control-sm" name="cron_spec" value="{{.CronSpec}}">
                         </div>
 
-                        <button type="submit" class="btn btn-success w-100">保存配置</button>
+                        <button type="submit" class="btn btn-success w-100">💾 保存配置</button>
                     </form>
                 </div>
             </div>
@@ -147,34 +155,45 @@
             .then(r => r.json())
             .then(data => {
                 if (data.log) {
-                    // 追加新日志
                     logsDiv.textContent += data.log;
-                    // 更新 offset
                     logOffset = data.offset;
-                    // 自动滚动到底部
                     logsDiv.scrollTop = logsDiv.scrollHeight;
                 }
             })
-            .catch(e => console.log("日志轮询错误", e));
+            .catch(e => console.log("日志轮询...", e));
     }
 
     // 每秒轮询一次
     setInterval(fetchLogs, 1000);
 
     function runNow() {
-        if(confirm("确定立即运行测速吗？")) {
+        if(confirm("确定立即运行测速吗？可能耗时较长。")) {
             fetch('/api/run').then(r=>r.text()).then(alert);
         }
     }
 
     function upload(type) {
         const input = document.getElementById('file_' + type);
-        if (!input.files[0]) return;
+        if (!input.files[0]) return alert("请先选择文件");
         const fd = new FormData();
         fd.append("file", input.files[0]);
         fd.append("type", type);
+        
+        // 简单的 Loading 提示
+        const btn = event.target;
+        const orgText = btn.innerText;
+        btn.innerText = "上传中...";
+        btn.disabled = true;
+
         fetch('/api/upload', {method:'POST', body:fd}).then(r=>{
-            if(r.ok) { alert("上传成功"); checkStatus(); }
+            if(r.ok) { 
+                alert("上传成功"); 
+                checkStatus(); 
+            } else {
+                alert("上传失败");
+            }
+            btn.innerText = orgText;
+            btn.disabled = false;
         });
     }
 
