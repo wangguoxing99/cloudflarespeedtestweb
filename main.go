@@ -55,6 +55,7 @@ var (
 )
 
 func main() {
+	// 创建数据目录
 	os.MkdirAll(dataDir, 0755)
 	
 	// 初始化日志文件
@@ -120,17 +121,15 @@ func runSpeedTestAndUpdateDNS() {
 	}
 
 	// 确定需要获取的 IP 数量
-	// 逻辑：如果是多域名，需要 len(domains) 个 IP；如果是单域名，需要 config.MaxResult 个 IP
 	requiredCount := config.MaxResult
 	if requiredCount <= 0 { requiredCount = 10 }
 	
-	// 如果多域名且数量超过 MaxResult，则以域名数量为准（保证每个域名至少有1个IP）
+	// 如果多域名且数量超过 MaxResult，则以域名数量为准
 	if len(domainList) > 1 && len(domainList) > requiredCount {
 		requiredCount = len(domainList)
 	}
 
-	// -dn 参数至少要比 requiredCount 大一点，或者相等，这里直接用 config.TestCount
-	// 如果用户设置的测速数量小于需求，强制调大
+	// 测速数量自动调整
 	testCount := config.TestCount
 	if testCount < requiredCount {
 		testCount = requiredCount
@@ -171,7 +170,6 @@ func runSpeedTestAndUpdateDNS() {
 
 	if err := cmd.Wait(); err != nil {
 		writeLog(fmt.Sprintf("测速命令执行出错 (通常是没找到满足条件的IP): %v", err))
-		// 注意：CFST 如果没找到 IP 有时会返回非 0，继续尝试读取 CSV 看是否有部分结果
 	}
 
 	// 4. 解析结果
@@ -182,7 +180,7 @@ func runSpeedTestAndUpdateDNS() {
 	}
 	writeLog(fmt.Sprintf("获取到 %d 个优选 IP", len(ips)))
 
-	// 5. 更新 DNS (核心逻辑修改)
+	// 5. 更新 DNS
 	updateDNSStrategy(domainList, ips)
 	
 	writeLog("=== 任务完成 ===")
@@ -195,10 +193,9 @@ func updateDNSStrategy(domains []string, ips []string) {
 		return
 	}
 
-	// 场景 A: 只有一个域名 -> 负载均衡模式 (将 Top N IP 全部解析到该域名)
+	// 场景 A: 只有一个域名 -> 负载均衡模式
 	if len(domains) == 1 {
 		domain := domains[0]
-		// 截取配置的最大数量
 		limit := config.MaxResult
 		if limit <= 0 { limit = 10 }
 		if len(ips) > limit { ips = ips[:limit] }
@@ -209,14 +206,13 @@ func updateDNSStrategy(domains []string, ips []string) {
 	}
 
 	// 场景 B: 多个域名 -> 1对1 映射模式
-	// 域名1 <- IP1, 域名2 <- IP2 ...
 	writeLog(fmt.Sprintf("正在更新 %d 个域名 (1对1 极速映射模式)...", len(domains)))
 	for i, domain := range domains {
 		if i >= len(ips) {
 			writeLog(fmt.Sprintf("警告: IP 数量不足，跳过域名 [%s]", domain))
 			break
 		}
-		selectedIP := []string{ips[i]} // 取对应排名的 IP
+		selectedIP := []string{ips[i]}
 		writeLog(fmt.Sprintf(" -> 域名 [%s] 解析到 IP [%s] (排名 #%d)", domain, ips[i], i+1))
 		updateCloudflareDNS(domain, selectedIP)
 	}
@@ -264,7 +260,6 @@ func parseResultCSV(file string, max int) []string {
 	if err != nil { return nil }
 
 	var ips []string
-	// 跳过标题，取第一列
 	for i, row := range records {
 		if i == 0 { continue }
 		if len(ips) >= max { break }
@@ -366,8 +361,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- 其他 Handler ---
-// (省略部分未变动的辅助函数, 完整代码需包含 combineFiles, sliceContains 等)
+// --- Web Handlers & Helpers ---
 
 func handleSave(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
@@ -376,7 +370,7 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	config.ZoneID = r.FormValue("zone_id")
 	config.APIKey = r.FormValue("api_key")
 	config.Email = r.FormValue("email")
-	config.Domains = r.FormValue("domains") // 变更
+	config.Domains = r.FormValue("domains")
 	config.DownloadURL = r.FormValue("download_url")
 	config.IPType = r.FormValue("ip_type")
 	config.Colo = strings.ToUpper(r.FormValue("colo"))
@@ -396,11 +390,73 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	tmpl, _ := template.ParseFiles("index.html")
 	mutex.Lock()
 	defer mutex.Unlock()
-	if config.MaxResult == 0 { config.MaxResult = 10 } // 默认值
+	if config.MaxResult == 0 { config.MaxResult = 10 }
 	tmpl.Execute(w, config)
 }
 
-// 以下函数复用之前的逻辑
+func handleRunNow(w http.ResponseWriter, r *http.Request) { 
+	go runSpeedTestAndUpdateDNS()
+	w.Write([]byte("ok"))
+}
+
+// 完整实现 handleUpload，防止简写错误
+func handleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "File upload error", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	tp := r.FormValue("type")
+	dest := ""
+	if tp == "cfst" {
+		dest = cfstFile
+	} else if tp == "ip4" {
+		dest = ip4File
+	} else if tp == "ip6" {
+		dest = ip6File
+	} else {
+		http.Error(w, "Unknown file type", http.StatusBadRequest)
+		return
+	}
+
+	out, err := os.Create(dest)
+	if err != nil {
+		http.Error(w, "Create file error", http.StatusInternalServerError)
+		return
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, file)
+	if err != nil {
+		http.Error(w, "Save file error", http.StatusInternalServerError)
+		return
+	}
+
+	if tp == "cfst" {
+		os.Chmod(dest, 0755)
+	}
+
+	w.Write([]byte("ok"))
+}
+
+func handleStatus(w http.ResponseWriter, r *http.Request) {
+	status := map[string]interface{}{
+		"has_cfst": fileExists(cfstFile),
+		"has_ip4":  fileExists(ip4File),
+		"has_ip6":  fileExists(ip6File),
+	}
+	json.NewEncoder(w).Encode(status)
+}
+
+// --- 基础工具函数 ---
+
 func loadConfig() {
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
 		config = Config{CronSpec: "0 * * * *", TestCount: 10, MaxResult: 10, IPType: "v4"}
@@ -408,3 +464,44 @@ func loadConfig() {
 	}
 	f, _ := os.Open(configFile)
 	json.NewDecoder(f).Decode(&config)
+	f.Close()
+}
+
+func saveConfig() { 
+	f, _ := os.Create(configFile)
+	json.NewEncoder(f).Encode(config)
+	f.Close() 
+}
+
+func updateCron() {
+	if len(cronRunner.Entries()) > 0 { 
+		cronRunner = cron.New()
+		cronRunner.Start() 
+	}
+	cronRunner.AddFunc(config.CronSpec, func() { go runSpeedTestAndUpdateDNS() })
+}
+
+func fileExists(f string) bool { 
+	_, e := os.Stat(f)
+	return !os.IsNotExist(e) 
+}
+
+func combineFiles(dst string, src ...string) {
+	out, _ := os.Create(dst)
+	defer out.Close()
+	for _, s := range src {
+		in, err := os.Open(s)
+		if err == nil { 
+			io.Copy(out, in)
+			in.Close()
+			out.Write([]byte("\n")) 
+		}
+	}
+}
+
+func sliceContains(s []string, e string) bool { 
+	for _, a := range s { 
+		if a == e { return true } 
+	}
+	return false 
+}
