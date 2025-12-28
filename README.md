@@ -1,67 +1,62 @@
-CloudflareSpeedTest Web Manager (Docker)
-一个基于 Docker 的轻量级 Web 管理面板，用于自动化运行 CloudflareSpeedTest，并将最优 IP 自动解析到 Cloudflare 托管的域名。
+# CloudflareSpeedTest Web Manager (Docker)
 
-无需手动 SSH 连接服务器，全通过 Web 界面管理核心文件、配置参数和查看实时日志。
+一个基于 Docker 的轻量级 Web 管理面板，用于自动化运行 [CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)，并将最优 IP 自动解析到 Cloudflare 托管的域名。
 
-✨ 主要特性
-轻量化：基于 Alpine Linux，镜像极小，占用资源极低。
+无需手动 SSH 连接服务器，全通过 Web 界面管理核心文件、配置参数、查看实时日志并自动更新 DNS。
 
-Web 文件管理：支持在网页端上传/更新 cfst 二进制文件及 ip.txt/ipv6.txt，无需重启容器，支持多架构（AMD64/ARM64）。
+## ✨ 主要特性
 
-灵活测速配置：
+* **轻量化**：基于 Alpine Linux，镜像极小，占用资源极低。
+* **Web 文件管理**：支持在网页端上传/更新 `cfst` 二进制文件及 `ip.txt`/`ipv6.txt`，无需重启容器，支持多架构（AMD64/ARM64）。
+* **灵活测速配置**：
+    * 支持 IPv4、IPv6 或混合测速。
+    * 支持自定义下载测速地址 (`-url`)。
+    * 支持指定测速端口 (`-tp`) 和延迟上下限 (`-tl`/`-tll`)。
+    * 支持指定地区码（如 `HKG`, `NRT`）并自动开启 HTTPing。
+* **智能 DNS 解析**：
+    * **负载均衡模式**：单域名对应多个优选 IP（如 `speed.abc.com` 解析到最快的 10 个 IP）。
+    * **1对1 分发模式**：多域名按速度排名一一对应解析（如 `Line1` 解析第1快，`Line2` 解析第2快...）。
+    * **自动修正**：强制要求设置主域名，完美解决 Cloudflare API 导致的 `yx.abc.com.abc.com` 双重后缀问题。
+    * **彻底清理**：每次更新前自动一次性获取并清理旧记录，防止记录残留。
+* **任务自动化**：内置 Cron 定时任务，全自动测速并更新 DNS。
+* **实时日志**：支持网页端查看实时滚动日志，并支持 **一键清除** 历史日志。
 
-支持 IPv4、IPv6 或混合测速。
+## 🛠️ 部署方式
 
-支持自定义下载测速地址 (-url)。
-
-支持指定测速端口 (-tp) 和延迟上下限 (-tl/-tll)。
-
-支持指定地区码（如 HKG, NRT）并自动开启 HTTPing。
-
-智能 DNS 解析：
-
-负载均衡模式：单域名对应多个优选 IP。
-
-1对1 分发模式：多域名按速度排名一一对应解析（如 line1 解析第1快，line2 解析第2快）。
-
-自动修正：智能识别主域名，防止出现 yx.abc.com.abc.com 双重后缀问题。
-
-任务自动化：内置 Cron 定时任务，全自动测速并更新 DNS。
-
-实时日志：支持网页端查看实时滚动日志，并支持一键清除历史日志。
-
-🛠️ 部署方式
 你需要先安装 Docker。推荐使用 Docker Compose。
 
-方式一：Docker Compose (推荐)
-创建一个目录（例如 cfst-web），并在其中创建 docker-compose.yml 文件：
+### 方式一：Docker Compose (推荐)
 
-YAML
+1.  创建一个目录（例如 `cfst-web`），并在其中创建 `docker-compose.yml` 文件：
 
-version: '3'
-services:
-  cfst-web:
-    # 如果你自己构建了镜像，请使用构建好的镜像名
-    # image: your-image-name:latest
-    build: .  # 如果你有源码，直接构建
-    container_name: cfst-web
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./data:/app/data
-    environment:
-      - TZ=Asia/Shanghai
-在同级目录下启动容器：
+    ```yaml
+    version: '3'
+    services:
+      cfst-web:
+        # 如果你自己构建了镜像，请使用构建好的镜像名
+        # image: your-image-name:latest
+        build: .  # 如果你有源码，直接构建；如果没有，请使用预编译镜像
+        container_name: cfst-web
+        restart: unless-stopped
+        ports:
+          - "8080:8080"
+        volumes:
+          - ./data:/app/data
+        environment:
+          - TZ=Asia/Shanghai
+    ```
 
-Bash
+2.  在同级目录下启动容器：
 
-docker-compose up -d
-方式二：Docker CLI
+    ```bash
+    docker-compose up -d
+    ```
+
+### 方式二：Docker CLI
+
 如果你不想使用 Compose，可以直接通过命令运行：
 
-Bash
-
+```bash
 # 1. 构建镜像 (假设你在源码目录)
 docker build -t cfst-web .
 
@@ -73,7 +68,7 @@ docker run -d \
     -v $(pwd)/data:/app/data \
     -e TZ=Asia/Shanghai \
     cfst-web
-⚙️ 初始化与使用指南
+#⚙️ 初始化与使用指南
 容器启动后，请访问 http://你的服务器IP:8080 进入管理后台。
 
 第一步：上传核心文件 (首次运行必须)
@@ -105,14 +100,14 @@ Zone ID: 域名的区域 ID (在域名概述页右下角)。
 
 主域名 (Main Domain): (必填) 填写该 Zone 的根域名（例如 abc.com）。
 
-作用：程序会用它来剔除子域名后缀，防止解析变成 yx.abc.com.abc.com。
+重要作用：程序会用它来剔除子域名后缀，防止解析变成 yx.abc.com.abc.com。
 
 2. 域名解析模式
 优选域名: 填写你想解析的完整子域名。
 
 单域名模式: 填入 speed.abc.com。程序会将最快的 N 个 IP 全部解析到这一个域名（负载均衡）。
 
-多域名模式: 填入 Line1.abc.com, Line2.abc.com (逗号分隔)。程序会将第 1 快的 IP 给 Line1，第 2 快的给 Line2... 实现线路分发。
+多域名模式: 填入 Line1.abc.com,Line2.abc.com (逗号分隔)。程序会将第 1 快的 IP 给 Line1，第 2 快的给 Line2... 实现线路分发。
 
 3. 测速参数
 自定义测速地址: 可填入 Cloudflare CDN 的大文件下载地址，留空则使用默认。
@@ -128,24 +123,4 @@ Zone ID: 域名的区域 ID (在域名概述页右下角)。
 
 观察右侧 "实时动态日志"，查看测速进度和 DNS 更新结果。
 
-📂 目录结构说明
-挂载的 /app/data 目录将包含以下文件：
-
-Plaintext
-
-/data/
-├── config.json      # 你的所有配置参数
-├── app.log          # 运行日志文件
-├── cfst             # 上传的测速主程序
-├── ip.txt           # IPv4 库
-├── ipv6.txt         # IPv6 库
-└── result.csv       # 最近一次测速的原始结果
-❓ 常见问题
-Q: 为什么解析出来的域名多了后缀？ (如 yx.abc.com.abc.com) A: 这是因为 Cloudflare API 的匹配机制问题。请务必在 Web 配置中填写正确的 "主域名 (Main Domain)"（例如 abc.com），程序会自动处理后缀。
-
-Q: 为什么日志显示“未发现旧记录”，但我 Cloudflare 上明明有？ A: 程序只会管理和删除与你配置的域名完全一致的记录。如果你配置的是 a.com，它不会去动 b.com 的记录。
-
-Q: 如何升级 CloudflareSpeedTest 版本？ A: 无需重新部署 Docker。只需在 GitHub 下载新版 cfst 文件，在 Web 界面重新上传覆盖即可。
-
-⚠️ 免责声明
-本项目仅为 CloudflareSpeedTest 提供 Web 界面和自动化调度外壳。核心测速逻辑由原项目提供。请勿将此工具用于非法用途。使用本工具产生的任何后果由用户自行承担。
+如果日志太长，可以点击 "🗑️ 清除日志" 按钮清空显示。
