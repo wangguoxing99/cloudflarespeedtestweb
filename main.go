@@ -22,14 +22,12 @@ import (
 
 // Config 存储用户配置
 type Config struct {
-	CronSpec      string  `json:"cron_spec"`      // Cron 表达式
-	ZoneID        string  `json:"zone_id"`        // Cloudflare Zone ID
-	APIKey        string  `json:"api_key"`        // Global API Key
-	Email         string  `json:"email"`          // Cloudflare 邮箱
-	MainDomain    string  `json:"main_domain"`    // 主域名 (Zone Name)
-	Domains       string  `json:"domains"`        // 优选域名列表
-	
-	// 测速参数
+	CronSpec      string  `json:"cron_spec"`
+	ZoneID        string  `json:"zone_id"`
+	APIKey        string  `json:"api_key"`
+	Email         string  `json:"email"`
+	MainDomain    string  `json:"main_domain"`
+	Domains       string  `json:"domains"`
 	DownloadURL   string  `json:"download_url"`
 	TestCount     int     `json:"test_count"`
 	MaxResult     int     `json:"max_result"`
@@ -76,9 +74,10 @@ func main() {
 	http.HandleFunc("/api/upload", handleUpload)
 	http.HandleFunc("/api/run", handleRunNow)
 	http.HandleFunc("/api/logs", handleLogs)
+	http.HandleFunc("/api/logs/clear", handleClearLogs) // [新增] 清除日志接口
 	http.HandleFunc("/api/status", handleStatus)
 
-	writeLog(fmt.Sprintf("Web server running on :8080 (Version: %s)", "1.5.0"))
+	writeLog(fmt.Sprintf("Web server running on :8080 (Version: %s)", "1.6.0"))
 	log.Println("Web server started on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -224,7 +223,6 @@ func updateDNSStrategy(domains []string, ips []string, zoneName string) {
 }
 
 func updateCloudflareDNS(domain string, newIPs []string, zoneName string) {
-	// 1. 获取现有记录 (关键修改：增加 per_page=100)
 	records, err := getDNSRecords(domain)
 	if err != nil {
 		writeLog(fmt.Sprintf("❌ 获取旧记录失败 [%s]: %v", domain, err))
@@ -237,14 +235,12 @@ func updateCloudflareDNS(domain string, newIPs []string, zoneName string) {
 		writeLog(fmt.Sprintf("ℹ️ 未发现旧记录 [%s]", domain))
 	}
 
-	// 2. 删除旧记录
 	for _, r := range records {
 		if err := deleteDNSRecord(r); err != nil {
 			writeLog(fmt.Sprintf("⚠️ 删除记录失败 (ID: %s): %v", r, err))
 		}
 	}
 
-	// 3. 计算记录名 (处理双重后缀)
 	recordName := domain
 	if zoneName != "" {
 		domainLower := strings.ToLower(domain)
@@ -256,7 +252,6 @@ func updateCloudflareDNS(domain string, newIPs []string, zoneName string) {
 		}
 	}
 
-	// 4. 创建新记录
 	for _, ip := range newIPs {
 		if err := createDNSRecord(recordName, ip); err != nil {
 			writeLog(fmt.Sprintf("❌ 创建记录失败 [%s -> %s]: %v", recordName, ip, err))
@@ -285,7 +280,6 @@ func fetchZoneName() (string, error) {
 }
 
 func getDNSRecords(domain string) ([]string, error) {
-	// 关键修改：添加 per_page=100，确保能一次性获取并删除所有积压的记录
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s&per_page=100", config.ZoneID, domain)
 	req, _ := http.NewRequest("GET", url, nil)
 	setHeaders(req)
@@ -312,11 +306,8 @@ func deleteDNSRecord(id string) error {
 	setHeaders(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil { return err }
-	defer resp.Body.Close() // 关键修改：及时关闭连接
-	
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("status code %d", resp.StatusCode)
-	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 { return fmt.Errorf("status code %d", resp.StatusCode) }
 	return nil
 }
 
@@ -324,7 +315,6 @@ func createDNSRecord(name, ip string) error {
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", config.ZoneID)
 	typeStr := "A"
 	if strings.Contains(ip, ":") { typeStr = "AAAA" }
-	
 	payload := map[string]interface{}{
 		"type": typeStr, "name": name, "content": ip, "ttl": 60, "proxied": false,
 	}
@@ -333,11 +323,8 @@ func createDNSRecord(name, ip string) error {
 	setHeaders(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil { return err }
-	defer resp.Body.Close() // 关键修改：及时关闭连接
-	
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("status code %d", resp.StatusCode)
-	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 { return fmt.Errorf("status code %d", resp.StatusCode) }
 	return nil
 }
 
@@ -387,6 +374,7 @@ func combineFiles(dst string, src ...string) error {
 func sliceContains(s []string, e string) bool { for _, a := range s { if a == e { return true } }; return false }
 
 // --- 日志与Web ---
+
 type LogWriter struct{}
 func (l LogWriter) Write(p []byte) (n int, err error) {
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -403,11 +391,25 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
 	f, err := os.Open(logFile); if err != nil { return }; defer f.Close()
 	info, _ := f.Stat()
+	// 如果前端的 offset 比文件大 (说明文件被清空过)，从 0 开始读
 	if offset > info.Size() { offset = 0 }
 	f.Seek(offset, 0)
 	content, _ := io.ReadAll(f)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"log": string(content), "offset": offset + int64(len(content))})
+}
+
+// [新增] 清除日志
+func handleClearLogs(w http.ResponseWriter, r *http.Request) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	// 将文件截断为 0 字节
+	if err := os.Truncate(logFile, 0); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeLog("=== 日志已手动清除 ===")
+	w.Write([]byte("ok"))
 }
 
 func handleSave(w http.ResponseWriter, r *http.Request) {
@@ -423,45 +425,4 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	config.IPType = r.FormValue("ip_type")
 	config.Colo = strings.ToUpper(r.FormValue("colo"))
 	config.EnableHTTPing = (r.FormValue("enable_httping") == "on")
-	fmt.Sscanf(r.FormValue("test_count"), "%d", &config.TestCount)
-	fmt.Sscanf(r.FormValue("max_result"), "%d", &config.MaxResult)
-	fmt.Sscanf(r.FormValue("min_speed"), "%f", &config.MinSpeed)
-	fmt.Sscanf(r.FormValue("max_delay"), "%d", &config.MaxDelay)
-	fmt.Sscanf(r.FormValue("min_delay"), "%d", &config.MinDelay)
-	fmt.Sscanf(r.FormValue("test_port"), "%d", &config.TestPort)
-	saveConfig()
-	updateCron()
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func handleUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" { return }
-	file, _, err := r.FormFile("file"); if err != nil { return }
-	defer file.Close()
-	tp := r.FormValue("type")
-	dest := ""
-	if tp == "cfst" { dest = cfstFile } else if tp == "ip4" { dest = ip4File } else if tp == "ip6" { dest = ip6File } else { return }
-	out, err := os.Create(dest); if err != nil { return }
-	defer out.Close()
-	io.Copy(out, file)
-	if tp == "cfst" { os.Chmod(dest, 0755) }
-	w.Write([]byte("ok"))
-}
-func handleStatus(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]bool{"has_cfst": fileExists(cfstFile), "has_ip4": fileExists(ip4File), "has_ip6": fileExists(ip6File)})
-}
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	tmpl, _ := template.ParseFiles("index.html")
-	mutex.Lock(); defer mutex.Unlock()
-	if config.MaxResult == 0 { config.MaxResult = 10 }
-	if config.TestPort == 0 { config.TestPort = 443 }
-	tmpl.Execute(w, config)
-}
-func handleRunNow(w http.ResponseWriter, r *http.Request) { go runSpeedTestAndUpdateDNS(); w.Write([]byte("ok")) }
-func loadConfig() {
-	if _, err := os.Stat(configFile); os.IsNotExist(err) { config = Config{CronSpec: "0 * * * *", TestCount: 10, MaxResult: 10, IPType: "v4", TestPort: 443}; return }
-	f, _ := os.Open(configFile); json.NewDecoder(f).Decode(&config); f.Close()
-}
-func saveConfig() { f, _ := os.Create(configFile); json.NewEncoder(f).Encode(config); f.Close() }
-func updateCron() { if len(cronRunner.Entries()) > 0 { cronRunner = cron.New(); cronRunner.Start() }; cronRunner.AddFunc(config.CronSpec, func() { go runSpeedTestAndUpdateDNS() }) }
-func fileExists(f string) bool { _, e := os.Stat(f); return !os.IsNotExist(e) }
+	fmt.Sscanf(r.FormValue("test_count
