@@ -67,19 +67,20 @@
                         <div class="row g-2 mb-3">
                             <div class="col-6"><input type="email" class="form-control form-control-sm" name="email" value="{{.Email}}" placeholder="Email" required></div>
                             <div class="col-6"><input type="password" class="form-control form-control-sm" name="api_key" value="{{.APIKey}}" placeholder="Global API Key" required></div>
-                            <div class="col-12"><input type="text" class="form-control form-control-sm" name="zone_id" value="{{.ZoneID}}" placeholder="Zone ID" required></div>
+                            <div class="col-6"><input type="text" class="form-control form-control-sm" name="zone_id" value="{{.ZoneID}}" placeholder="Zone ID" required></div>
+                            <div class="col-6">
+                                <input type="text" class="form-control form-control-sm border-warning" name="main_domain" value="{{.MainDomain}}" placeholder="主域名 (如 abc.com)" required>
+                            </div>
+                            <div class="col-12"><div class="form-text text-danger small mt-0">* 必填: 请填写该 Zone 的主域名(如 baidu.com)，否则可能解析为双重后缀。</div></div>
                         </div>
 
-                        <h6 class="text-muted mb-2">域名解析</h6>
+                        <h6 class="text-muted mb-2">优选解析</h6>
                         <div class="mb-3">
-                            <input type="text" class="form-control" name="domains" value="{{.Domains}}" placeholder="例如: speed.abc.com" required>
-                            <div class="form-text small">
-                                支持多域名逗号分隔，实现按速度 1对1 分发。
-                            </div>
+                            <input type="text" class="form-control" name="domains" value="{{.Domains}}" placeholder="例如: yx.abc.com" required>
+                            <div class="form-text small">填写完整的子域名 (如 yx.abc.com)。程序会自动剔除主域名后缀。</div>
                         </div>
 
                         <h6 class="text-muted mb-2">测速参数</h6>
-                        
                         <div class="mb-2">
                             <label class="small text-muted">自定义测速地址 (-url)</label>
                             <input type="text" class="form-control form-control-sm" name="download_url" value="{{.DownloadURL}}" placeholder="留空使用默认">
@@ -169,7 +170,6 @@
 <script>
     let logOffset = 0;
     const logsDiv = document.getElementById('logs');
-
     function fetchLogs() {
         fetch('/api/logs?offset=' + logOffset)
             .then(r => r.json())
@@ -184,11 +184,7 @@
     }
     setInterval(fetchLogs, 1500);
 
-    function runNow() {
-        if(confirm("确定立即运行测速吗？")) {
-            fetch('/api/run').then(r=>r.text()).then(alert);
-        }
-    }
+    function runNow() { if(confirm("确定立即运行测速吗？")) { fetch('/api/run').then(r=>r.text()).then(alert); } }
 
     function upload(type) {
         const input = document.getElementById('file_' + type);
@@ -196,12 +192,10 @@
         const fd = new FormData();
         fd.append("file", input.files[0]);
         fd.append("type", type);
-        
         const btn = event.target;
         const orgText = btn.innerText;
         btn.innerText = "上传中...";
         btn.disabled = true;
-
         fetch('/api/upload', {method:'POST', body:fd}).then(r=>{
             if(r.ok) { alert("上传成功"); checkStatus(); } 
             else { alert("上传失败"); }
@@ -219,13 +213,8 @@
 
     function updateBadge(id, status, name) {
         const el = document.getElementById(id);
-        if(status) {
-            el.className = "badge bg-success ms-1";
-            el.innerText = name + ": √";
-        } else {
-            el.className = "badge bg-danger ms-1";
-            el.innerText = name + ": ×";
-        }
+        if(status) { el.className = "badge bg-success ms-1"; el.innerText = name + ": √"; } 
+        else { el.className = "badge bg-danger ms-1"; el.innerText = name + ": ×"; }
     }
     checkStatus();
 </script>
