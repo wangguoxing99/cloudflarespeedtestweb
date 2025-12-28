@@ -26,7 +26,7 @@ services:
   cfst-web:
     # 如果你使用自己的镜像，请替换为 ghcr.io/你的用户名/你的仓库名:latest
     # 或者先本地构建: build: .
-    image: ghcr.io/your-username/cfst-web:latest 
+    image: ghcr.io/wangguoxing99/cloudflarespeedtest-docker 
     container_name: cfst-web
     restart: unless-stopped
     ports:
