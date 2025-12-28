@@ -86,12 +86,12 @@ Zone ID: 域名的区域 ID (在域名概述页右下角)。
 
 1.  创建一个目录（例如 `cfst-web`），并在其中创建 `docker-compose.yml` 文件：
 
-    ```yaml
+  ```yaml
     version: '3'
     services:
       cfst-web:
         # 如果你自己构建了镜像，请使用构建好的镜像名
-　　　　 image: ghcr.io/wangguoxing99/cloudflarespeedtest-docker
+        # image: ghcr.io/wangguoxing99/cloudflarespeedtest-docker
         build: .  # 如果你有源码，直接构建；如果没有，请使用预编译镜像
         container_name: cfst-web
         restart: unless-stopped
