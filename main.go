@@ -425,4 +425,45 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	config.IPType = r.FormValue("ip_type")
 	config.Colo = strings.ToUpper(r.FormValue("colo"))
 	config.EnableHTTPing = (r.FormValue("enable_httping") == "on")
-	fmt.Sscanf(r.FormValue("test_count
+	fmt.Sscanf(r.FormValue("test_count"), "%d", &config.TestCount)
+	fmt.Sscanf(r.FormValue("max_result"), "%d", &config.MaxResult)
+	fmt.Sscanf(r.FormValue("min_speed"), "%f", &config.MinSpeed)
+	fmt.Sscanf(r.FormValue("max_delay"), "%d", &config.MaxDelay)
+	fmt.Sscanf(r.FormValue("min_delay"), "%d", &config.MinDelay)
+	fmt.Sscanf(r.FormValue("test_port"), "%d", &config.TestPort)
+	saveConfig()
+	updateCron()
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func handleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" { return }
+	file, _, err := r.FormFile("file"); if err != nil { return }
+	defer file.Close()
+	tp := r.FormValue("type")
+	dest := ""
+	if tp == "cfst" { dest = cfstFile } else if tp == "ip4" { dest = ip4File } else if tp == "ip6" { dest = ip6File } else { return }
+	out, err := os.Create(dest); if err != nil { return }
+	defer out.Close()
+	io.Copy(out, file)
+	if tp == "cfst" { os.Chmod(dest, 0755) }
+	w.Write([]byte("ok"))
+}
+func handleStatus(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(map[string]bool{"has_cfst": fileExists(cfstFile), "has_ip4": fileExists(ip4File), "has_ip6": fileExists(ip6File)})
+}
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	tmpl, _ := template.ParseFiles("index.html")
+	mutex.Lock(); defer mutex.Unlock()
+	if config.MaxResult == 0 { config.MaxResult = 10 }
+	if config.TestPort == 0 { config.TestPort = 443 }
+	tmpl.Execute(w, config)
+}
+func handleRunNow(w http.ResponseWriter, r *http.Request) { go runSpeedTestAndUpdateDNS(); w.Write([]byte("ok")) }
+func loadConfig() {
+	if _, err := os.Stat(configFile); os.IsNotExist(err) { config = Config{CronSpec: "0 * * * *", TestCount: 10, MaxResult: 10, IPType: "v4", TestPort: 443}; return }
+	f, _ := os.Open(configFile); json.NewDecoder(f).Decode(&config); f.Close()
+}
+func saveConfig() { f, _ := os.Create(configFile); json.NewEncoder(f).Encode(config); f.Close() }
+func updateCron() { if len(cronRunner.Entries()) > 0 { cronRunner = cron.New(); cronRunner.Start() }; cronRunner.AddFunc(config.CronSpec, func() { go runSpeedTestAndUpdateDNS() }) }
+func fileExists(f string) bool { _, e := os.Stat(f); return !os.IsNotExist(e) }
