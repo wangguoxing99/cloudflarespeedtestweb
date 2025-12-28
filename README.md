@@ -1,3 +1,61 @@
+# ⚙️初始化与使用指南
+容器启动后，请访问 http://你的服务器IP:8080 进入管理后台。
+
+第一步：上传核心文件 (首次运行必须)
+由于版权和架构兼容性原因，镜像内不包含 cfst 测速程序，你需要手动上传：
+
+前往 CloudflareSpeedTest Releases 下载对应你 CPU 架构的压缩包（Linux amd64 或 arm64）。
+
+解压文件。
+
+在 Web 界面 "1. 核心文件管理" 卡片中：
+
+点击 "执行文件 (cfst)" 后的上传按钮，上传解压得到的 CloudflareST 文件 (程序会自动重命名并赋予权限)。
+
+点击 "IPv4" 上传 ip.txt。
+
+点击 "IPv6" 上传 ipv6.txt (如果需要)。
+
+点击右上角的 "刷新状态"，确保状态变为绿色的 "√"。
+
+第二步：配置参数
+在 "2. 参数配置" 卡片中填写信息：
+
+1. Cloudflare API 设置
+Email: Cloudflare 账号邮箱。
+
+Global API Key: 在 CF 后台 -> My Profile -> API Tokens -> Global API Key 查看。
+
+Zone ID: 域名的区域 ID (在域名概述页右下角)。
+
+主域名 (Main Domain): (必填) 填写该 Zone 的根域名（例如 abc.com）。
+
+重要作用：程序会用它来剔除子域名后缀，防止解析变成 yx.abc.com.abc.com。
+
+2. 域名解析模式
+优选域名: 填写你想解析的完整子域名。
+
+单域名模式: 填入 speed.abc.com。程序会将最快的 N 个 IP 全部解析到这一个域名（负载均衡）。
+
+多域名模式: 填入 Line1.abc.com,Line2.abc.com (逗号分隔)。程序会将第 1 快的 IP 给 Line1，第 2 快的给 Line2... 实现线路分发。
+
+3. 测速参数
+自定义测速地址: 可填入 Cloudflare CDN 的大文件下载地址，留空则使用默认。
+
+延迟/速度限制: 根据需求设置 -tl (上限), -tll (下限), -sl (速度下限)。
+
+测速端口: 默认为 443，可改为 80, 2053 等 CF 支持的端口。
+
+第三步：保存并运行
+点击底部的 "💾 保存配置"。
+
+点击右侧日志栏顶部的 "⚡ 立即测速"。
+
+观察右侧 "实时动态日志"，查看测速进度和 DNS 更新结果。
+
+如果日志太长，可以点击 "🗑️ 清除日志" 按钮清空显示。
+
+
 # CloudflareSpeedTest Web Manager (Docker)
 
 一个基于 Docker 的轻量级 Web 管理面板，用于自动化运行 [CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)，并将最优 IP 自动解析到 Cloudflare 托管的域名。
@@ -69,59 +127,4 @@ docker run -d \
     -e TZ=Asia/Shanghai \
     cfst-web
 
-#⚙️ 初始化与使用指南
-容器启动后，请访问 http://你的服务器IP:8080 进入管理后台。
 
-第一步：上传核心文件 (首次运行必须)
-由于版权和架构兼容性原因，镜像内不包含 cfst 测速程序，你需要手动上传：
-
-前往 CloudflareSpeedTest Releases 下载对应你 CPU 架构的压缩包（Linux amd64 或 arm64）。
-
-解压文件。
-
-在 Web 界面 "1. 核心文件管理" 卡片中：
-
-点击 "执行文件 (cfst)" 后的上传按钮，上传解压得到的 CloudflareST 文件 (程序会自动重命名并赋予权限)。
-
-点击 "IPv4" 上传 ip.txt。
-
-点击 "IPv6" 上传 ipv6.txt (如果需要)。
-
-点击右上角的 "刷新状态"，确保状态变为绿色的 "√"。
-
-第二步：配置参数
-在 "2. 参数配置" 卡片中填写信息：
-
-1. Cloudflare API 设置
-Email: Cloudflare 账号邮箱。
-
-Global API Key: 在 CF 后台 -> My Profile -> API Tokens -> Global API Key 查看。
-
-Zone ID: 域名的区域 ID (在域名概述页右下角)。
-
-主域名 (Main Domain): (必填) 填写该 Zone 的根域名（例如 abc.com）。
-
-重要作用：程序会用它来剔除子域名后缀，防止解析变成 yx.abc.com.abc.com。
-
-2. 域名解析模式
-优选域名: 填写你想解析的完整子域名。
-
-单域名模式: 填入 speed.abc.com。程序会将最快的 N 个 IP 全部解析到这一个域名（负载均衡）。
-
-多域名模式: 填入 Line1.abc.com,Line2.abc.com (逗号分隔)。程序会将第 1 快的 IP 给 Line1，第 2 快的给 Line2... 实现线路分发。
-
-3. 测速参数
-自定义测速地址: 可填入 Cloudflare CDN 的大文件下载地址，留空则使用默认。
-
-延迟/速度限制: 根据需求设置 -tl (上限), -tll (下限), -sl (速度下限)。
-
-测速端口: 默认为 443，可改为 80, 2053 等 CF 支持的端口。
-
-第三步：保存并运行
-点击底部的 "💾 保存配置"。
-
-点击右侧日志栏顶部的 "⚡ 立即测速"。
-
-观察右侧 "实时动态日志"，查看测速进度和 DNS 更新结果。
-
-如果日志太长，可以点击 "🗑️ 清除日志" 按钮清空显示。
