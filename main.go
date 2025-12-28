@@ -34,8 +34,8 @@ type Config struct {
 	MaxResult     int     `json:"max_result"`     // 单域名解析IP数量
 	MinSpeed      float64 `json:"min_speed"`      // -sl 速度下限
 	MaxDelay      int     `json:"max_delay"`      // -tl 延迟上限
-	MinDelay      int     `json:"min_delay"`      // -tll 延迟下限 (新增)
-	TestPort      int     `json:"test_port"`      // -tp 测速端口 (新增)
+	MinDelay      int     `json:"min_delay"`      // -tll 延迟下限
+	TestPort      int     `json:"test_port"`      // -tp 测速端口
 	IPType        string  `json:"ip_type"`        // "v4", "v6", "both"
 	Colo          string  `json:"colo"`           // 地区码
 	EnableHTTPing bool    `json:"enable_httping"` // HTTPing
@@ -83,7 +83,7 @@ func main() {
 	http.HandleFunc("/api/logs", handleLogs)
 	http.HandleFunc("/api/status", handleStatus)
 
-	writeLog(fmt.Sprintf("Web server running on :8080 (Version: %s)", "1.2.0"))
+	writeLog(fmt.Sprintf("Web server running on :8080 (Version: %s)", "1.3.1"))
 	log.Println("Web server started on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -104,7 +104,6 @@ func runSpeedTestAndUpdateDNS() {
 		writeLog("❌ 错误: 找不到 cfst 可执行文件，请先上传！")
 		return
 	}
-	// 确保执行权限（防止上传后丢失权限）
 	os.Chmod(cfstFile, 0755)
 
 	targetIPFile := ip4File
@@ -123,7 +122,19 @@ func runSpeedTestAndUpdateDNS() {
 		return
 	}
 
-	// 2. 参数构建
+	// 2. 预检 API 和 Zone 信息 (修复域名双重后缀的关键步骤)
+	zoneName := ""
+	if config.ZoneID != "" && config.APIKey != "" {
+		var err error
+		zoneName, err = fetchZoneName()
+		if err != nil {
+			writeLog(fmt.Sprintf("⚠️ 获取 Zone 信息失败 (可能导致域名解析后缀重复): %v", err))
+		} else {
+			writeLog(fmt.Sprintf("✅ 识别到主域名 (Zone): %s", zoneName))
+		}
+	}
+
+	// 3. 参数构建
 	domainList := parseDomains(config.Domains)
 	if len(domainList) == 0 {
 		writeLog("❌ 错误: 未配置域名，无法进行解析")
@@ -152,8 +163,8 @@ func runSpeedTestAndUpdateDNS() {
 		"-dn", fmt.Sprintf("%d", testCount),
 		"-sl", fmt.Sprintf("%.2f", config.MinSpeed),
 		"-tl", fmt.Sprintf("%d", config.MaxDelay),
-		"-tll", fmt.Sprintf("%d", config.MinDelay), // 新增
-		"-tp", fmt.Sprintf("%d", port),             // 新增
+		"-tll", fmt.Sprintf("%d", config.MinDelay),
+		"-tp", fmt.Sprintf("%d", port),
 		"-f", targetIPFile,
 	}
 
@@ -166,7 +177,7 @@ func runSpeedTestAndUpdateDNS() {
 
 	writeLog(fmt.Sprintf("🚀 执行命令: cfst %v", strings.Join(args, " ")))
 
-	// 3. 执行测速
+	// 4. 执行测速
 	cmd := exec.Command(cfstFile, args...)
 	cmd.Dir = dataDir
 	
@@ -185,7 +196,7 @@ func runSpeedTestAndUpdateDNS() {
 		writeLog(fmt.Sprintf("⚠️ 测速结束 (Exit Code: %v) - 请检查上方日志是否有报错", err))
 	}
 
-	// 4. 解析结果
+	// 5. 解析结果
 	ips := parseResultCSV(resultFile, requiredCount)
 	if len(ips) == 0 {
 		writeLog("❌ 失败: 未获取到任何满足条件的 IP")
@@ -193,13 +204,13 @@ func runSpeedTestAndUpdateDNS() {
 	}
 	writeLog(fmt.Sprintf("✅ 获取到 %d 个优选 IP", len(ips)))
 
-	// 5. 更新 DNS
-	updateDNSStrategy(domainList, ips)
+	// 6. 更新 DNS
+	updateDNSStrategy(domainList, ips, zoneName)
 	
 	writeLog("=== 任务完成 ===")
 }
 
-func updateDNSStrategy(domains []string, ips []string) {
+func updateDNSStrategy(domains []string, ips []string, zoneName string) {
 	if config.ZoneID == "" || config.APIKey == "" {
 		writeLog("⚠️ 跳过 DNS 更新: API 配置缺失")
 		return
@@ -213,7 +224,7 @@ func updateDNSStrategy(domains []string, ips []string) {
 		if len(ips) > limit { ips = ips[:limit] }
 		
 		writeLog(fmt.Sprintf("📡 更新域名 [%s] (负载均衡, IP数: %d)...", domain, len(ips)))
-		updateCloudflareDNS(domain, ips)
+		updateCloudflareDNS(domain, ips, zoneName)
 		return
 	}
 
@@ -225,25 +236,39 @@ func updateDNSStrategy(domains []string, ips []string) {
 			break
 		}
 		writeLog(fmt.Sprintf(" -> [%s] 解析至 [%s]", domain, ips[i]))
-		updateCloudflareDNS(domain, []string{ips[i]})
+		updateCloudflareDNS(domain, []string{ips[i]}, zoneName)
 	}
 }
 
-func updateCloudflareDNS(domain string, newIPs []string) {
+func updateCloudflareDNS(domain string, newIPs []string, zoneName string) {
+	// 1. 获取现有记录 (搜索时使用完整域名)
 	records, err := getDNSRecords(domain)
 	if err != nil {
 		writeLog(fmt.Sprintf("❌ 获取记录失败 [%s]: %v", domain, err))
 		return
 	}
 
-	// 删除旧记录
+	// 2. 删除旧记录
 	for _, r := range records {
 		deleteDNSRecord(r)
 	}
 
-	// 添加新记录
+	// 3. 计算 Record Name (避免双重后缀)
+	// 如果 domain 是 "yx.abc.com" 且 zoneName 是 "abc.com"，则 recordName 应该设为 "yx"
+	// 如果 domain 是 "abc.com" 且 zoneName 是 "abc.com"，则 recordName 应该设为 "@"
+	recordName := domain
+	if zoneName != "" {
+		if domain == zoneName {
+			recordName = "@"
+		} else if strings.HasSuffix(domain, "."+zoneName) {
+			// 移除后缀 .abc.com
+			recordName = strings.TrimSuffix(domain, "."+zoneName)
+		}
+	}
+
+	// 4. 添加新记录
 	for _, ip := range newIPs {
-		createDNSRecord(domain, ip)
+		createDNSRecord(domain, recordName, ip)
 	}
 }
 
@@ -294,7 +319,26 @@ func combineFiles(dst string, src ...string) error {
 
 // --- Cloudflare API ---
 
+// 新增: 获取 Zone 真实名称 (如 abc.com)
+func fetchZoneName() (string, error) {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s", config.ZoneID)
+	req, _ := http.NewRequest("GET", url, nil)
+	setHeaders(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil { return "", err }
+	defer resp.Body.Close()
+
+	var res struct {
+		Success bool `json:"success"`
+		Result struct { Name string `json:"name"` } `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil { return "", err }
+	if !res.Success { return "", fmt.Errorf("zone fetch failed") }
+	return res.Result.Name, nil
+}
+
 func getDNSRecords(domain string) ([]string, error) {
+	// 查询时使用完整域名 (FQDN) 是最准确的
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s", config.ZoneID, domain)
 	req, _ := http.NewRequest("GET", url, nil)
 	setHeaders(req)
@@ -322,17 +366,21 @@ func deleteDNSRecord(id string) {
 	http.DefaultClient.Do(req)
 }
 
-func createDNSRecord(domain, ip string) {
+// 修改: 接受 recordName 用于创建
+func createDNSRecord(fullDomain, recordName, ip string) {
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", config.ZoneID)
 	typeStr := "A"
 	if strings.Contains(ip, ":") { typeStr = "AAAA" }
+	
+	// payload 中使用 recordName (例如 "yx" 或 "@")
 	payload := map[string]interface{}{
-		"type": typeStr, "name": domain, "content": ip, "ttl": 60, "proxied": false,
+		"type": typeStr, "name": recordName, "content": ip, "ttl": 60, "proxied": false,
 	}
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	setHeaders(req)
-	http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil { defer resp.Body.Close() }
 }
 
 func setHeaders(req *http.Request) {
@@ -348,7 +396,7 @@ func (l LogWriter) Write(p []byte) (n int, err error) {
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil { return 0, err }
 	defer f.Close()
-	fmt.Print(string(p)) // 同时输出到 Docker logs
+	fmt.Print(string(p)) 
 	return f.Write(p)
 }
 func getLogWriter() io.Writer { return LogWriter{} }
@@ -398,8 +446,6 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	fmt.Sscanf(r.FormValue("max_result"), "%d", &config.MaxResult)
 	fmt.Sscanf(r.FormValue("min_speed"), "%f", &config.MinSpeed)
 	fmt.Sscanf(r.FormValue("max_delay"), "%d", &config.MaxDelay)
-	
-	// 新增参数保存
 	fmt.Sscanf(r.FormValue("min_delay"), "%d", &config.MinDelay)
 	fmt.Sscanf(r.FormValue("test_port"), "%d", &config.TestPort)
 
